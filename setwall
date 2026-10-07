@@ -1,0 +1,72 @@
+#!/bin/bash
+#
+# setwall -- 换视频壁纸
+#
+#   ./setwall                    弹出文件选择框挑一个视频
+#   ./setwall ~/Movies/a.mp4     直接指定
+#
+set -euo pipefail
+
+DIR="$(cd "$(dirname "$0")" && pwd)"
+BIN="$DIR/vidwall"
+CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/vidwall"
+CONF="$CONF_DIR/config"
+
+if [ ! -x "$BIN" ]; then
+    echo "错误: 找不到可执行文件 $BIN, 先在本目录执行 make" >&2
+    exit 1
+fi
+
+if [ $# -eq 0 ]; then
+    if command -v zenity >/dev/null 2>&1; then
+        VIDEO="$(zenity --file-selection --title='选择壁纸视频' \
+            --file-filter='视频文件 | *.mp4 *.mkv *.webm *.mov *.avi *.m4v' \
+            --file-filter='所有文件 | *' 2>/dev/null || true)"
+        if [ -z "$VIDEO" ]; then
+            echo "已取消"
+            exit 0
+        fi
+    else
+        echo "用法: $0 <视频文件>" >&2
+        exit 2
+    fi
+else
+    VIDEO="$1"
+fi
+
+if [ ! -f "$VIDEO" ]; then
+    echo "错误: 找不到文件 $VIDEO" >&2
+    exit 1
+fi
+
+VIDEO="$(readlink -f "$VIDEO")"
+
+mkdir -p "$CONF_DIR"
+if [ ! -f "$CONF" ]; then
+    cat > "$CONF" << 'EOF'
+# vidwall 配置
+# video 这一行由 setwall 脚本自动维护, 也可以手动改
+hwdec=nvdec
+vo=gpu
+loop=yes
+EOF
+fi
+
+# 替换(或追加) video= 那一行, 保留其它设置
+grep -v -E '^[[:space:]]*video[[:space:]]*=' "$CONF" > "$CONF.tmp" || true
+printf 'video=%s\n' "$VIDEO" >> "$CONF.tmp"
+mv "$CONF.tmp" "$CONF"
+
+# 让正在跑的壁纸立刻换成新视频
+if pgrep -x vidwall >/dev/null 2>&1; then
+    pkill -x vidwall || true
+    sleep 0.6
+fi
+nohup "$BIN" >/dev/null 2>&1 &
+disown 2>/dev/null || true
+
+echo "壁纸已切换为:"
+echo "  $VIDEO"
+echo
+echo "配置写在: $CONF"
+echo "(开机自启会读取这个配置, 所以重启后还是这个视频)"
